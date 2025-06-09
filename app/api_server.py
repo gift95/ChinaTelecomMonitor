@@ -43,7 +43,8 @@ def save_login_info(login_info):
 def login():
     """登录接口"""
     data = request.get_json() if request.method == "POST" else request.args
-    phonenum, password = data.get("phonenum"), data.get("password")
+    phonenum = data.get("phonenum") or os.environ.get("PHONENUM")
+    password = data.get("password") or os.environ.get("PASSWORD")
     if not phonenum or not password:
         return jsonify({"message": "手机号和密码不能为空"}), 400
     elif whitelist_num := os.environ.get("WHITELIST_NUM"):
@@ -70,7 +71,8 @@ def query_data(query_func, **kwargs):
     查询数据，如果本地没有登录信息或密码不匹配，则尝试登录后再查询
     """
     data = request.get_json() if request.method == "POST" else request.args
-    phonenum, password = data.get("phonenum"), data.get("password")
+    phonenum = data.get("phonenum") or os.environ.get("PHONENUM")
+    password = data.get("password") or os.environ.get("PASSWORD")
     # 检查登录信息，避免重复登录
     login_info = load_login_info()
     if (
