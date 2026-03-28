@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 # Repo: https://github.com/Cp0204/ChinaTelecomMonitor
 # ConfigFile: telecom_config.json
-# Modify: 2024-05-11
+# Modify: 2026-03-23
 
 """
 任务名称
@@ -14,7 +14,8 @@ cron: 0 20 * * *
 import os
 import sys
 import json
-from datetime import datetime
+import datetime
+import calendar
 
 # 兼容青龙
 try:
@@ -28,6 +29,8 @@ except:
 CONFIG_DATA = {}
 NOTIFYS = []
 CONFIG_PATH = sys.argv[1] if len(sys.argv) > 1 else "telecom_config.json"
+TELECOM_FLUX_PACKAGE = os.environ.get("TELECOM_FLUX_PACKAGE", "true").lower() != "false"
+TELECOM_ONLY_WARN = os.environ.get("TELECOM_ONLY_WARN", "false").lower() == "true"
 
 
 # 发送通知消息
@@ -54,9 +57,28 @@ def add_notify(text):
     return text
 
 
+def usage_status_icon(used, total):
+    """流量使用状态图标"""
+    if total <= 0:
+        return "⚫"  # 无流量
+    if used >= total:
+        return "🔴"  # 超流量
+    # 未超提示进度
+    today = datetime.date.today()
+    _, days_in_month = calendar.monthrange(today.year, today.month)
+    time_progress = today.day / days_in_month
+    usage_progress = used / total
+    if usage_progress > time_progress * 1.5:
+        return "🟠"  # 已超过均匀用量50%
+    elif usage_progress > time_progress:
+        return "🟡"  # 已超过均匀用量
+    else:
+        return "🟢"  # 均匀使用范围内
+
+
 def main():
     global CONFIG_DATA
-    start_time = datetime.now()
+    start_time = datetime.datetime.now()
     print(f"===============程序开始===============")
     print(f"⏰ 执行时间: {start_time.strftime('%Y-%m-%d %H:%M:%S')}")
     print()
@@ -95,7 +117,9 @@ def main():
                 print(f"自动登录：成功")
                 login_info = data["responseData"]["data"]["loginSuccessResult"]
                 login_info["phonenum"] = phonenum
-                login_info["createTime"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                login_info["createTime"] = datetime.datetime.now().strftime(
+                    "%Y-%m-%d %H:%M:%S"
+                )
                 CONFIG_DATA["login_info"] = login_info
                 CONFIG_DATA["loginFailTime"] = 0
                 telecom.set_login_info(login_info)
@@ -145,32 +169,36 @@ def main():
         CONFIG_DATA["summary"] = summary
 
     # 获取流量包明细
-    flux_package_str = ""
-    user_flux_package = telecom.user_flux_package()
-    if user_flux_package:
-        print("获取流量包明细：成功")
-        packages = user_flux_package["responseData"]["data"]["productOFFRatable"][
-            "ratableResourcePackages"
-        ]
-        for package in packages:
-            package_icon = (
-                "🇨🇳"
-                if "国内" in package["title"]
-                else "📺" if "专用" in package["title"] else "🌎"
-            )
-            flux_package_str += f"\n{package_icon}{package['title']}\n"
-            for product in package["productInfos"]:
-                if product["infiniteTitle"]:
-                    # 无限流量
-                    flux_package_str += f"""🔹[{product['title']}]{product['infiniteTitle']}{product['infiniteValue']}{product['infiniteUnit']}/无限\n"""
-                else:
-                    flux_package_str += f"""🔹[{product['title']}]{product['leftTitle']}{product['leftHighlight']}{product['rightCommon']}\n"""
+    if TELECOM_FLUX_PACKAGE:
+        flux_package_str = ""
+        user_flux_package = telecom.user_flux_package()
+        if user_flux_package:
+            print("获取流量包明细：成功")
+            packages = user_flux_package["responseData"]["data"]["productOFFRatable"][
+                "ratableResourcePackages"
+            ]
+            for package in packages:
+                package_icon = (
+                    "🇨🇳"
+                    if "国内" in package["title"]
+                    else "📺" if "专用" in package["title"] else "🌎"
+                )
+                flux_package_str += f"\n{package_icon}{package['title']}\n"
+                for product in package["productInfos"]:
+                    if product["infiniteTitle"]:
+                        # 无限流量
+                        flux_package_str += f"""🔹[{product['title']}]{product['infiniteTitle']}{product['infiniteValue']}{product['infiniteUnit']}/无限\n"""
+                    else:
+                        flux_package_str += f"""🔹[{product['title']}]{product['leftTitle']}{product['leftHighlight']}{product['rightCommon']}\n"""
+
     # 流量字符串
     common_str = (
-        f"{telecom.convert_flow(summary['commonUse'],'GB',2)} / {telecom.convert_flow(summary['commonTotal'],'GB',2)} GB 🟢"
+        f"{telecom.convert_flow(summary['commonUse'],'GB',2)} / {telecom.convert_flow(summary['commonTotal'],'GB',2)} GB"
         if summary["flowOver"] == 0
-        else f"-{telecom.convert_flow(summary['flowOver'],'GB',2)} / {telecom.convert_flow(summary['commonTotal'],'GB',2)} GB 🔴"
+        else f"-{telecom.convert_flow(summary['flowOver'],'GB',2)} / {telecom.convert_flow(summary['commonTotal'],'GB',2)} GB"
     )
+    status_icon = usage_status_icon(summary["commonUse"], summary["commonTotal"])
+    common_str = f"{common_str} {status_icon}"
     special_str = (
         f"{telecom.convert_flow(summary['specialUse'], 'GB', 2)} / {telecom.convert_flow(summary['specialTotal'], 'GB', 2)} GB"
         if summary["specialTotal"] > 0
@@ -186,7 +214,7 @@ def main():
   - 通用：{common_str}{f'{chr(10)}  - 专用：{special_str}' if special_str else ''}"""
 
     # 流量包明细
-    if os.environ.get("TELECOM_FLUX_PACKAGE", "true").lower() != "false":
+    if TELECOM_FLUX_PACKAGE:
         notify_str += f"\n\n【流量包明细】\n\n{flux_package_str.strip()}"
 
     notify_str += f"\n\n查询时间：{summary['createTime']}"
@@ -195,10 +223,14 @@ def main():
 
     # 通知
     if NOTIFYS:
-        notify_body = "\n".join(NOTIFYS)
         print(f"===============推送通知===============")
-        send_notify("【电信套餐用量监控】", notify_body)
-        print()
+        if TELECOM_ONLY_WARN and status_icon == "🟢":
+            print("流量使用在均匀范围内，跳过通知")
+            print()
+        else:
+            notify_body = "\n".join(NOTIFYS)
+            send_notify("【电信套餐用量监控】", notify_body)
+            print()
 
     update_config()
 
